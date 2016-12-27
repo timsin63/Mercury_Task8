@@ -1,12 +1,18 @@
 package com.example.user.task_8;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Camera;
+import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.TotalCaptureResult;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
@@ -14,6 +20,8 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.util.SparseArray;
+import android.util.SparseIntArray;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -21,10 +29,22 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageButton;
 
+import java.lang.reflect.Array;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements SurfaceHolder.Callback{
+
+
+    private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
+    static {
+        ORIENTATIONS.append(Surface.ROTATION_0, 90);
+        ORIENTATIONS.append(Surface.ROTATION_90, 0);
+        ORIENTATIONS.append(Surface.ROTATION_180, 270);
+        ORIENTATIONS.append(Surface.ROTATION_270, 180);
+    }
 
     private static final String TAG = "MAIN_ACTIVITY";
     private static final int REQUEST_CODE_CAMERA = 350;
@@ -34,6 +54,9 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     CameraManager cameraManager;
     String[] cameraIdsList;
     CameraCaptureSession captureSession;
+    ImageReader imageReader;
+    SurfaceView surfaceView;
+    SurfaceHolder surfaceHolder;
 
     Surface cameraSurface = null;
 
@@ -43,14 +66,13 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         super.onCreate(savedInstanceState);
         setContentView(R.layout.a_main);
 
-        getWindow().setBackgroundDrawable(getResources().getDrawable(R.drawable.chirikj));
 
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
-        SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surface_view);
+        surfaceView = (SurfaceView) findViewById(R.id.surface_view);
 
-        SurfaceHolder surfaceHolder = surfaceView.getHolder();
+        surfaceHolder = surfaceView.getHolder();
         surfaceHolder.addCallback(this);
 
         cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
@@ -65,6 +87,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             @Override
             public void onOpened(CameraDevice cameraDevice) {
                 camera = cameraDevice;
+
                 Log.d(TAG, "camera: on Opened");
             }
 
@@ -88,7 +111,48 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             public void onClick(View view) {
 
                 camera.close();
+                cameraSurface.release();
+
                 openCam(1);
+
+            }
+        });
+
+
+        final ImageButton captureButton = (ImageButton) findViewById(R.id.capture_btn);
+        captureButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Log.d(TAG, "capture clicked");
+
+
+                try {
+                    CaptureRequest.Builder builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+                    builder.addTarget(imageReader.getSurface());
+                    CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
+                        @Override
+                        public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+                            super.onCaptureCompleted(session, request, result);
+                            Log.d(TAG, "CAPTURED! YEAH");
+
+                            Image image = imageReader.acquireLatestImage();
+                            ByteBuffer byteBuffer = image.getPlanes()[0].getBuffer();
+                            byte[] bytes = new byte[byteBuffer.capacity()];
+                            byteBuffer.get(bytes);
+                            Intent intent = new Intent(MainActivity.this, PreviewActivity.class);
+                            intent.putExtra(PreviewActivity.IMAGE_TAG, bytes);
+
+                            startActivity(intent);
+                        }
+                    };
+
+                    int rotation = getWindowManager().getDefaultDisplay().getRotation();
+                    builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
+
+                    captureSession.capture(builder.build(), captureCallback, null);
+                } catch (CameraAccessException e) {
+                    Log.e(TAG, e.getLocalizedMessage());
+                }
 
             }
         });
@@ -119,8 +183,11 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     }
 
     private void configureCamera() throws CameraAccessException {
+
+        imageReader = ImageReader.newInstance(1280, 1024, ImageFormat.JPEG, 1);
         List<Surface> list = new ArrayList<>();
         list.add(cameraSurface);
+        list.add(imageReader.getSurface());
 
             camera.createCaptureSession(list, new CameraCaptureSession.StateCallback() {
                 @Override
@@ -132,6 +199,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                         CaptureRequest.Builder builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                         builder.addTarget(cameraSurface);
                         captureSession.setRepeatingRequest(builder.build(), null, null);
+
                     } catch (CameraAccessException e) {
                         Log.e(TAG, e.getLocalizedMessage());
                     }
@@ -175,6 +243,27 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
     @Override
     public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
+
+        Log.d(TAG, "surface destroyed");
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        cameraSurface.release();
+        captureSession.close();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
 
     }
 }

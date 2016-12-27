@@ -25,4 +25,12 @@
         android:layout_marginTop="16dp"
         android:layout_alignParentTop="true"
         android:layout_centerHorizontal="true" />
+
+    <ImageButton
+        android:id="@+id/capture_btn"
+        android:layout_width="@dimen/button_size"
+        android:layout_height="@dimen/button_size"
+        android:background="@drawable/capture"
+        android:layout_alignParentBottom="true"
+        android:layout_alignStart="@+id/swipe_cam" />
 </RelativeLayout>
