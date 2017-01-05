@@ -2,6 +2,7 @@ package com.example.user.task_8;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Camera;
 import android.graphics.ImageFormat;
@@ -39,15 +40,25 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
 
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
+    private static final SparseIntArray ORIENTATIONS_FRONT = new SparseIntArray();
     static {
         ORIENTATIONS.append(Surface.ROTATION_0, 90);
         ORIENTATIONS.append(Surface.ROTATION_90, 0);
         ORIENTATIONS.append(Surface.ROTATION_180, 270);
         ORIENTATIONS.append(Surface.ROTATION_270, 180);
+
+        ORIENTATIONS_FRONT.append(Surface.ROTATION_0, 270);
+        ORIENTATIONS_FRONT.append(Surface.ROTATION_90, 0);
+        ORIENTATIONS_FRONT.append(Surface.ROTATION_180, 90);
+        ORIENTATIONS_FRONT.append(Surface.ROTATION_270, 180);
     }
 
     private static final String TAG = "MAIN_ACTIVITY";
+    private static final String CAMERA_STATE_TAG = "STATE_PREF";
     private static final int REQUEST_CODE_CAMERA = 350;
+
+    private static final int CAMERA_STATE_BACK = 0;
+    private static final int CAMERA_STATE_FRONT = 1;
 
     CameraDevice.StateCallback cameraStateCallback;
     CameraDevice camera;
@@ -57,8 +68,11 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     ImageReader imageReader;
     SurfaceView surfaceView;
     SurfaceHolder surfaceHolder;
+    SharedPreferences preferences;
 
     Surface cameraSurface = null;
+    int cameraState = 1;
+
 
 
     @Override
@@ -110,10 +124,18 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             @Override
             public void onClick(View view) {
 
+                if (cameraState == CAMERA_STATE_BACK){
+                    cameraState = CAMERA_STATE_FRONT;
+                } else {
+                    cameraState = CAMERA_STATE_BACK;
+                }
+
+                saveCameraState(cameraState);
                 camera.close();
                 cameraSurface.release();
+                captureSession.close();
 
-                openCam(1);
+                openCam(cameraState);
 
             }
         });
@@ -147,7 +169,14 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                     };
 
                     int rotation = getWindowManager().getDefaultDisplay().getRotation();
-                    builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
+
+                    if (cameraState == CAMERA_STATE_FRONT){
+                        builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS_FRONT.get(rotation));
+                    } else {
+                        builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
+                    }
+
+
 
                     captureSession.capture(builder.build(), captureCallback, null);
                 } catch (CameraAccessException e) {
@@ -162,9 +191,6 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     protected void onStart() {
         super.onStart();
 
-        openCam(0);
-
-
     }
 
     private void openCam(int cameraId){
@@ -173,6 +199,9 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         }
 
         try {
+            if (camera != null) {
+                camera.close();
+            }
             cameraManager.openCamera(cameraIdsList[cameraId], cameraStateCallback, null);
             Log.d(TAG, "openCam");
         } catch (CameraAccessException e) {
@@ -213,6 +242,13 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
     }
 
+    private void saveCameraState(int cameraState){
+        preferences = getPreferences(MODE_PRIVATE);
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putInt(CAMERA_STATE_TAG, cameraState);
+        editor.commit();
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -250,8 +286,12 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     @Override
     protected void onStop() {
         super.onStop();
-        cameraSurface.release();
-        captureSession.close();
+        if (cameraSurface != null) {
+            cameraSurface.release();
+        }
+        if (captureSession != null) {
+            captureSession.close();
+        }
     }
 
     @Override
@@ -265,5 +305,15 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         super.onResume();
 
 
+        preferences = getPreferences(MODE_PRIVATE);
+        cameraState = preferences.getInt(CAMERA_STATE_TAG, 0);
+        openCam(cameraState);
+
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        saveCameraState(cameraState);
     }
 }
