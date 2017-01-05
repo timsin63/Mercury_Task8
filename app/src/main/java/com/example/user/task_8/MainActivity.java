@@ -6,12 +6,14 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Camera;
 import android.graphics.ImageFormat;
+import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.MeteringRectangle;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Handler;
@@ -23,6 +25,7 @@ import android.os.Bundle;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.SparseIntArray;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -31,6 +34,7 @@ import android.view.WindowManager;
 import android.widget.ImageButton;
 
 import java.lang.reflect.Array;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -69,6 +73,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     SurfaceView surfaceView;
     SurfaceHolder surfaceHolder;
     SharedPreferences preferences;
+    CaptureRequest.Builder builder;
 
     Surface cameraSurface = null;
     int cameraState = 1;
@@ -102,7 +107,16 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             public void onOpened(CameraDevice cameraDevice) {
                 camera = cameraDevice;
 
+                if (cameraSurface != null) {
+                    try {
+                        configureCamera();
+                    } catch (CameraAccessException e) {
+                        Log.e(TAG, e.getLocalizedMessage());
+                    }
+                }
+
                 Log.d(TAG, "camera: on Opened");
+
             }
 
             @Override
@@ -124,6 +138,8 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             @Override
             public void onClick(View view) {
 
+
+
                 if (cameraState == CAMERA_STATE_BACK){
                     cameraState = CAMERA_STATE_FRONT;
                 } else {
@@ -131,12 +147,10 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                 }
 
                 saveCameraState(cameraState);
-                camera.close();
-                cameraSurface.release();
-                captureSession.close();
 
                 openCam(cameraState);
 
+//
             }
         });
 
@@ -155,7 +169,6 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                         @Override
                         public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
                             super.onCaptureCompleted(session, request, result);
-                            Log.d(TAG, "CAPTURED! YEAH");
 
                             Image image = imageReader.acquireLatestImage();
                             ByteBuffer byteBuffer = image.getPlanes()[0].getBuffer();
@@ -212,11 +225,14 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     }
 
     private void configureCamera() throws CameraAccessException {
+        Log.d(TAG, "configure camera");
 
         imageReader = ImageReader.newInstance(1280, 1024, ImageFormat.JPEG, 1);
         List<Surface> list = new ArrayList<>();
+
         list.add(cameraSurface);
         list.add(imageReader.getSurface());
+
 
             camera.createCaptureSession(list, new CameraCaptureSession.StateCallback() {
                 @Override
@@ -225,7 +241,8 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                     Log.d(TAG, "captureSession onConfigured");
 
                     try {
-                        CaptureRequest.Builder builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                        builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+
                         builder.addTarget(cameraSurface);
                         captureSession.setRepeatingRequest(builder.build(), null, null);
 
@@ -238,8 +255,29 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                 public void onConfigureFailed(CameraCaptureSession cameraCaptureSession) {
                     Log.e(TAG, "CaptureSessionConfigure failed");
                 }
+
             }, null);
 
+
+
+        //TODO MANUAL FOCUS
+        surfaceView.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View view, MotionEvent motionEvent) {
+
+                MeteringRectangle meteringRectangle = new MeteringRectangle((int) motionEvent.getX(), (int) motionEvent.getY(), 100, 100, 100);
+                MeteringRectangle[] meteringRectangleArr = {meteringRectangle};
+
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, meteringRectangleArr);
+                try {
+                    captureSession.setRepeatingRequest(builder.build(), null, null);
+                } catch (CameraAccessException e) {
+                    Log.e(TAG, e.getLocalizedMessage());
+                }
+
+                return false;
+            }
+        });
     }
 
     private void saveCameraState(int cameraState){
@@ -262,6 +300,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     @Override
     public void surfaceCreated(SurfaceHolder surfaceHolder) {
         cameraSurface = surfaceHolder.getSurface();
+
         Log.d(TAG, "surface created");
     }
 
@@ -280,8 +319,11 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     @Override
     public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
 
+
         Log.d(TAG, "surface destroyed");
     }
+
+
 
     @Override
     protected void onStop() {
@@ -309,6 +351,8 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         cameraState = preferences.getInt(CAMERA_STATE_TAG, 0);
         openCam(cameraState);
 
+
+
     }
 
     @Override
@@ -316,4 +360,6 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         super.onSaveInstanceState(outState);
         saveCameraState(cameraState);
     }
+
+
 }
