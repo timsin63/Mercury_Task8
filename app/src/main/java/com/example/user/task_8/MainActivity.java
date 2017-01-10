@@ -5,7 +5,13 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Camera;
+import android.graphics.Canvas;
 import android.graphics.ImageFormat;
+import android.graphics.Paint;
+import android.graphics.PixelFormat;
+import android.graphics.Point;
+import android.graphics.PorterDuff;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -23,6 +29,7 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.util.Size;
 import android.util.SparseArray;
 import android.util.SparseIntArray;
 import android.view.MotionEvent;
@@ -59,6 +66,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
     private static final String TAG = "MAIN_ACTIVITY";
     private static final String CAMERA_STATE_TAG = "STATE_PREF";
+    private static final String FLASH_STATE_TAG = "FLASH_STATE_PREF";
     private static final int REQUEST_CODE_CAMERA = 350;
 
     private static final int CAMERA_STATE_BACK = 0;
@@ -70,14 +78,16 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     String[] cameraIdsList;
     CameraCaptureSession captureSession;
     ImageReader imageReader;
-    SurfaceView surfaceView;
-    SurfaceHolder surfaceHolder;
+    SurfaceView surfaceView, transparentView;
+    SurfaceHolder surfaceHolder, transparentHolder;
     SharedPreferences preferences;
     CaptureRequest.Builder builder;
+    ImageButton flashButton;
 
     Surface cameraSurface = null;
     int cameraState = 1;
 
+    boolean isFlashActivated = true;
 
 
     @Override
@@ -90,9 +100,15 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         surfaceView = (SurfaceView) findViewById(R.id.surface_view);
+        transparentView = (SurfaceView) findViewById(R.id.transparent_view);
 
         surfaceHolder = surfaceView.getHolder();
+
+        transparentHolder = transparentView.getHolder();
         surfaceHolder.addCallback(this);
+
+        transparentHolder.setFormat(PixelFormat.TRANSLUCENT);
+        transparentView.setZOrderMediaOverlay(true);
 
         cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
 
@@ -101,6 +117,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         } catch (CameraAccessException e) {
             Log.e(TAG, "CameraAccessException");
         }
+
 
         cameraStateCallback = new CameraDevice.StateCallback() {
             @Override
@@ -114,9 +131,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                         Log.e(TAG, e.getLocalizedMessage());
                     }
                 }
-
                 Log.d(TAG, "camera: on Opened");
-
             }
 
             @Override
@@ -134,33 +149,62 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
         ImageButton swipeButton = (ImageButton) findViewById(R.id.swipe_cam);
 
-        swipeButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
+        //Swiping
+        if (cameraIdsList.length == 1){
+            swipeButton.setEnabled(false);
+            swipeButton.setVisibility(View.INVISIBLE);
+        } else {
+            swipeButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
 
-
-
-                if (cameraState == CAMERA_STATE_BACK){
-                    cameraState = CAMERA_STATE_FRONT;
-                } else {
-                    cameraState = CAMERA_STATE_BACK;
+                    if (cameraState == CAMERA_STATE_BACK) {
+                        cameraState = CAMERA_STATE_FRONT;
+                    } else {
+                        cameraState = CAMERA_STATE_BACK;
+                    }
+                    saveCameraState(cameraState, isFlashActivated);
+                    openCam(cameraState);
                 }
+            });
+        }
 
-                saveCameraState(cameraState);
 
-                openCam(cameraState);
+        isFlashActivated = getPreferences(MODE_PRIVATE).getBoolean(FLASH_STATE_TAG, false);
+        //Flash
+        flashButton = (ImageButton) findViewById(R.id.flash_button);
 
-//
+//        if (!getApplicationContext().getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH)){
+//            flashButton.setEnabled(false);
+//            flashButton.setVisibility(View.INVISIBLE);
+//            isFlashActivated = false;
+//        } else {
+            if (isFlashActivated) {
+                flashButton.setBackgroundResource(R.drawable.no_flash);
+            } else {
+                flashButton.setBackgroundResource(R.drawable.flash);
             }
-        });
+            flashButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    if (isFlashActivated) {
+                        isFlashActivated = false;
+                        flashButton.setBackgroundResource(R.drawable.flash);
+                    } else {
+                        isFlashActivated = true;
+                        flashButton.setBackgroundResource(R.drawable.no_flash);
+                    }
+                    saveCameraState(cameraState, isFlashActivated);
+                }
+            });
+  //      }
 
-
+        //Capture
         final ImageButton captureButton = (ImageButton) findViewById(R.id.capture_btn);
         captureButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 Log.d(TAG, "capture clicked");
-
 
                 try {
                     CaptureRequest.Builder builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
@@ -189,13 +233,16 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                         builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
                     }
 
-
+                    if (isFlashActivated){
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
+                    } else {
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF);
+                    }
 
                     captureSession.capture(builder.build(), captureCallback, null);
                 } catch (CameraAccessException e) {
                     Log.e(TAG, e.getLocalizedMessage());
                 }
-
             }
         });
     }
@@ -265,25 +312,60 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             @Override
             public boolean onTouch(View view, MotionEvent motionEvent) {
 
-                MeteringRectangle meteringRectangle = new MeteringRectangle((int) motionEvent.getX(), (int) motionEvent.getY(), 100, 100, 100);
+                final float pointX = motionEvent.getX();
+                final float pointY = motionEvent.getY();
+
+                Rect rect = new Rect((int) pointX - 100, (int) pointY - 100, (int) pointX + 100, (int) pointY + 100);
+
+                MeteringRectangle meteringRectangle = new MeteringRectangle(rect, 1000);
                 MeteringRectangle[] meteringRectangleArr = {meteringRectangle};
 
+                builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
                 builder.set(CaptureRequest.CONTROL_AF_REGIONS, meteringRectangleArr);
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_MACRO);
+                builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START);
+                builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
+
                 try {
                     captureSession.setRepeatingRequest(builder.build(), null, null);
                 } catch (CameraAccessException e) {
                     Log.e(TAG, e.getLocalizedMessage());
                 }
 
+
+                Paint paint = new Paint();
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(getResources().getColor(R.color.white));
+                final Canvas canvas = transparentHolder.lockCanvas();
+
+                canvas.drawColor(getResources().getColor(R.color.transparent), PorterDuff.Mode.CLEAR);
+                canvas.drawCircle(pointX, pointY, 100, paint);
+
+                canvas.drawRect(rect, paint);
+                transparentHolder.unlockCanvasAndPost(canvas);
+
+                new Handler().postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        transparentHolder.lockCanvas();
+                        canvas.drawColor(getResources().getColor(R.color.transparent), PorterDuff.Mode.CLEAR);
+                        transparentHolder.unlockCanvasAndPost(canvas);
+                    }
+                }, 1000);
+
                 return false;
             }
         });
+
     }
 
-    private void saveCameraState(int cameraState){
+    private void saveCameraState(int cameraState, boolean isFlashActivated){
         preferences = getPreferences(MODE_PRIVATE);
         SharedPreferences.Editor editor = preferences.edit();
         editor.putInt(CAMERA_STATE_TAG, cameraState);
+        editor.putBoolean(FLASH_STATE_TAG, isFlashActivated);
+        Log.d("ISFLASH_SAVING", String.valueOf(isFlashActivated));
         editor.commit();
     }
 
@@ -346,20 +428,20 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     protected void onResume() {
         super.onResume();
 
-
         preferences = getPreferences(MODE_PRIVATE);
         cameraState = preferences.getInt(CAMERA_STATE_TAG, 0);
+
+        Log.d("ISFLASH", String.valueOf(isFlashActivated));
         openCam(cameraState);
-
-
 
     }
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        saveCameraState(cameraState);
+        saveCameraState(cameraState, isFlashActivated);
     }
+
 
 
 }
